@@ -61,6 +61,14 @@ def override(name, props):
     return {"matcher": {"id": "byName", "options": name}, "properties": [{"id": k, "value": v} for k, v in props.items()]}
 
 
+TRACK_MODE_COLORS = [
+    {"type": "regex", "options": {"pattern": "^Transcode.*", "result": {"color": "orange", "index": 0}}},
+    {"type": "regex", "options": {"pattern": "^Direct.*", "result": {"color": "green", "index": 1}}},
+    # Jellyfin sent no transcode details and none were seen earlier for this playback.
+    {"type": "value", "options": {"Unknown": {"color": "gray", "text": "Transcode · details unavailable", "index": 2}}},
+]
+
+
 def cpu_series(name="CPU"):
     return override(name, {
         "unit": "percent", "min": 0, "max": 100, "custom.axisPlacement": "right", "custom.stacking": {"mode": "none"},
@@ -87,7 +95,7 @@ panels = [
         "id": pid(), "type": "table", "title": "Now playing", "datasource": DS,
         "gridPos": {"x": 0, "y": 15, "w": 24, "h": 8},
         "targets": [
-            target(f"max by (session, user, device, client, title, method, video_codec, audio_codec, resolution, hw_accel, transcode_reasons) (jellyfin_stream_info{{{U}}})", ref="A", instant=True, fmt="table"),
+            target(f"max by (session, user, device, client, title, method, video, audio, resolution, hw_accel, transcode_reasons) (jellyfin_stream_info{{{U}}})", ref="A", instant=True, fmt="table"),
             target("max by (session) (jellyfin_stream_bitrate_bps)", ref="B", instant=True, fmt="table"),
             target("max by (session) (jellyfin_stream_progress_ratio) * 100", ref="C", instant=True, fmt="table"),
             target("max by (session) (jellyfin_stream_paused)", ref="D", instant=True, fmt="table"),
@@ -96,11 +104,11 @@ panels = [
             {"id": "merge", "options": {}},
             {"id": "organize", "options": {
                 "excludeByName": {"Time": True, "Value #A": True, "session": True},
-                "indexByName": {"user": 0, "title": 1, "Value #D": 2, "method": 3, "Value #B": 4, "resolution": 5,
-                                "video_codec": 6, "audio_codec": 7, "hw_accel": 8, "transcode_reasons": 9,
+                "indexByName": {"user": 0, "title": 1, "Value #D": 2, "method": 3, "video": 4, "audio": 5,
+                                "Value #B": 6, "resolution": 7, "hw_accel": 8, "transcode_reasons": 9,
                                 "Value #C": 10, "device": 11, "client": 12},
                 "renameByName": {"user": "User", "title": "Title", "Value #D": "State", "method": "Method", "Value #B": "Bitrate",
-                                 "resolution": "Resolution", "video_codec": "Video", "audio_codec": "Audio", "hw_accel": "HW accel",
+                                 "resolution": "Resolution", "video": "Video", "audio": "Audio", "hw_accel": "HW accel",
                                  "transcode_reasons": "Transcode reasons", "Value #C": "Progress", "device": "Device", "client": "Client"},
             }},
         ],
@@ -108,6 +116,11 @@ panels = [
             "defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}}},
             "overrides": [
                 override("Bitrate", {"unit": "bps"}),
+                override("Video", {"mappings": TRACK_MODE_COLORS, "custom.cellOptions": {"type": "color-text"}, "custom.width": 210}),
+                override("Audio", {"mappings": TRACK_MODE_COLORS, "custom.cellOptions": {"type": "color-text"}, "custom.width": 300}),
+                override("Title", {"custom.width": 300}),
+                override("User", {"custom.width": 120}),
+                *[override(col, {"custom.width": w}) for col, w in (("State", 110), ("Method", 110), ("Bitrate", 100), ("HW accel", 90))],
                 override("Progress", {"unit": "percent", "min": 0, "max": 100, "custom.cellOptions": {"type": "gauge", "mode": "basic"}, "custom.width": 160}),
                 override("State", {"mappings": [{"type": "value", "options": {"0": {"text": "▶ Playing", "color": "green"}, "1": {"text": "⏸ Paused", "color": "yellow"}}}],
                                    "custom.cellOptions": {"type": "color-text"}}),

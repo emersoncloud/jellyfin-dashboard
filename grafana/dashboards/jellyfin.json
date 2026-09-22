@@ -525,7 +525,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max by (session, user, device, client, title, method, video_codec, audio_codec, resolution, hw_accel, transcode_reasons) (jellyfin_stream_info{user=~\"$user\"})",
+          "expr": "max by (session, user, device, client, title, method, video, audio, resolution, hw_accel, transcode_reasons) (jellyfin_stream_info{user=~\"$user\"})",
           "legendFormat": "",
           "refId": "A",
           "format": "table",
@@ -587,10 +587,10 @@
               "title": 1,
               "Value #D": 2,
               "method": 3,
-              "Value #B": 4,
-              "resolution": 5,
-              "video_codec": 6,
-              "audio_codec": 7,
+              "video": 4,
+              "audio": 5,
+              "Value #B": 6,
+              "resolution": 7,
               "hw_accel": 8,
               "transcode_reasons": 9,
               "Value #C": 10,
@@ -604,8 +604,8 @@
               "method": "Method",
               "Value #B": "Bitrate",
               "resolution": "Resolution",
-              "video_codec": "Video",
-              "audio_codec": "Audio",
+              "video": "Video",
+              "audio": "Audio",
               "hw_accel": "HW accel",
               "transcode_reasons": "Transcode reasons",
               "Value #C": "Progress",
@@ -634,6 +634,184 @@
               {
                 "id": "unit",
                 "value": "bps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Video"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^Transcode.*",
+                      "result": {
+                        "color": "orange",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^Direct.*",
+                      "result": {
+                        "color": "green",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "Unknown": {
+                        "color": "gray",
+                        "text": "Transcode \u00b7 details unavailable",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 210
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Audio"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^Transcode.*",
+                      "result": {
+                        "color": "orange",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^Direct.*",
+                      "result": {
+                        "color": "green",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "value",
+                    "options": {
+                      "Unknown": {
+                        "color": "gray",
+                        "text": "Transcode \u00b7 details unavailable",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Title"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "User"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Method"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bitrate"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "HW accel"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
               }
             ]
           },

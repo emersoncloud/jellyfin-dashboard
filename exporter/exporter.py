@@ -8,7 +8,7 @@ import logging
 import os
 import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from prometheus_client import start_http_server
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
@@ -16,7 +16,9 @@ from prometheus_client.core import REGISTRY, GaugeMetricFamily
 log = logging.getLogger("jellyfin-exporter")
 
 STREAM_LABELS = ["session", "user", "device", "client", "title", "media_type", "method"]
-INFO_LABELS = STREAM_LABELS + ["video_codec", "audio_codec", "hw_accel", "transcode_reasons", "resolution"]
+INFO_LABELS = STREAM_LABELS + ["video", "audio", "hw_accel", "transcode_reasons", "resolution"]
+
+CHANNEL_LAYOUTS = {1: "mono", 2: "stereo", 6: "5.1", 8: "7.1"}
 
 
 @dataclass(frozen=True)
@@ -31,12 +33,14 @@ class Stream:
     paused: bool
     bitrate: int  # bits/sec actually being sent
     progress: float  # 0..1
-    video_codec: str
-    audio_codec: str
+    video: str  # e.g. "Direct · h264" or "Transcode · hevc → h264"
+    audio: str  # e.g. "Transcode · truehd 7.1 → aac stereo"
     hw_accel: str
     transcode_reasons: str
     resolution: str
     transcode_fps: float | None
+    key: str = ""  # session id + item id; identifies one playback across scrapes
+    has_transcode_info: bool = False
 
     @property
     def labels(self) -> list[str]:
@@ -44,7 +48,7 @@ class Stream:
 
     @property
     def info_labels(self) -> list[str]:
-        return self.labels + [self.video_codec, self.audio_codec, self.hw_accel, self.transcode_reasons, self.resolution]
+        return self.labels + [self.video, self.audio, self.hw_accel, self.transcode_reasons, self.resolution]
 
 
 def format_title(item: dict) -> str:
@@ -63,6 +67,27 @@ def _selected_streams(item: dict, play_state: dict) -> tuple[dict, dict]:
     audio = next((s for s in streams if s.get("Type") == "Audio" and s.get("Index") == audio_idx), None)
     audio = audio or next((s for s in streams if s.get("Type") == "Audio"), {})
     return video, audio
+
+
+def describe_track(direct: bool, src_codec: str | None, out_codec: str | None,
+                   src_channels: int | None = None, out_channels: int | None = None) -> str:
+    def fmt(codec, channels):
+        codec = (codec or "?").lower()
+        return f"{codec} {CHANNEL_LAYOUTS.get(channels, f'{channels}ch')}" if channels else codec
+
+    src = fmt(src_codec, src_channels)
+    if direct:
+        return f"Direct · {src}"
+    return f"Transcode · {src} → {fmt(out_codec or src_codec, out_channels or src_channels)}"
+
+
+def _is_direct(tinfo: dict, key: str, src_codec: str | None, out_codec_key: str) -> bool:
+    if not tinfo:
+        return True
+    if key in tinfo:
+        return bool(tinfo[key])
+    # Older servers may omit IsVideoDirect/IsAudioDirect; infer from codec change.
+    return (tinfo.get(out_codec_key) or "").lower() == (src_codec or "").lower()
 
 
 def parse_session(session: dict) -> Stream | None:
@@ -84,6 +109,10 @@ def parse_session(session: dict) -> Stream | None:
     width = tinfo.get("Width") or video.get("Width")
     height = tinfo.get("Height") or video.get("Height")
 
+    # Jellyfin omits TranscodingInfo while a transcode is throttled or after it kills the job
+    # during a long pause. Don't guess "Direct" for tracks we know nothing about.
+    unknown = method == "Transcode" and not tinfo
+
     return Stream(
         session=session.get("Id", "")[:8],
         user=session.get("UserName") or "unknown",
@@ -95,12 +124,39 @@ def parse_session(session: dict) -> Stream | None:
         paused=bool(play_state.get("IsPaused")),
         bitrate=bitrate,
         progress=ticks / runtime if runtime else 0.0,
-        video_codec=(tinfo.get("VideoCodec") or video.get("Codec") or "").lower(),
-        audio_codec=(tinfo.get("AudioCodec") or audio.get("Codec") or "").lower(),
+        video="Unknown" if unknown and video else describe_track(
+            _is_direct(tinfo, "IsVideoDirect", video.get("Codec"), "VideoCodec"),
+            video.get("Codec"), tinfo.get("VideoCodec"),
+        ) if video else "",
+        audio="Unknown" if unknown and audio else describe_track(
+            _is_direct(tinfo, "IsAudioDirect", audio.get("Codec"), "AudioCodec"),
+            audio.get("Codec"), tinfo.get("AudioCodec"), audio.get("Channels"), tinfo.get("AudioChannels"),
+        ) if audio else "",
         hw_accel=tinfo.get("HardwareAccelerationType") or ("none" if tinfo else ""),
         transcode_reasons=",".join(tinfo.get("TranscodeReasons") or []),
         resolution=f"{width}x{height}" if width and height else "",
         transcode_fps=tinfo.get("Framerate"),
+        key=f"{session.get('Id', '')}:{item.get('Id', '')}",
+        has_transcode_info=bool(tinfo),
+    )
+
+
+def reconcile(current: Stream, last: Stream | None) -> Stream:
+    """Fill gaps in `current` with the last full transcode details seen for the same playback."""
+    if current.has_transcode_info or not last or last.method == "DirectPlay":
+        return current
+    # Playing with PlayMethod=DirectPlay and no transcode info is a genuine switch to direct play.
+    if not current.paused and current.method == "DirectPlay":
+        return current
+    return replace(
+        current,
+        method=last.method,
+        video=last.video,
+        audio=last.audio,
+        hw_accel=last.hw_accel,
+        transcode_reasons=last.transcode_reasons,
+        resolution=last.resolution,
+        bitrate=last.bitrate,
     )
 
 
@@ -109,6 +165,7 @@ class JellyfinCollector:
         self.url = url.rstrip("/")
         self.headers = {"Authorization": f'MediaBrowser Token="{api_key}"', "Accept": "application/json"}
         self.timeout = timeout
+        self._last: dict[str, Stream] = {}
 
     def describe(self):
         # Skip auto-describe, which would hit Jellyfin at registration time.
@@ -136,7 +193,9 @@ class JellyfinCollector:
         duration.add_metric([], time.monotonic() - started)
         yield duration
 
-        streams = [s for s in map(parse_session, sessions) if s]
+        parsed = [s for s in map(parse_session, sessions) if s]
+        streams = [reconcile(s, self._last.get(s.key)) for s in parsed]
+        self._last = {s.key: s for s in streams}  # also drops playbacks that ended
 
         info = GaugeMetricFamily("jellyfin_stream_info", "Active stream (always 1)", labels=INFO_LABELS)
         bitrate = GaugeMetricFamily("jellyfin_stream_bitrate_bps", "Bits/sec being sent to the client", labels=STREAM_LABELS)
