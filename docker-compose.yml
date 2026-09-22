@@ -1,0 +1,55 @@
+name: jellyfin-dashboard
+
+services:
+  jellyfin-exporter:
+    build: ./exporter
+    restart: unless-stopped
+    # Jellyfin runs on the same Unraid host; reach its published port via the host gateway.
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      JELLYFIN_URL: ${JELLYFIN_URL}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY}
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    restart: unless-stopped
+    # Host pid/network namespaces give real CPU, memory and NIC stats.
+    # No rootfs mount: Unraid's / isn't a shared mount, and filesystem metrics aren't needed.
+    network_mode: host
+    pid: host
+    command:
+      - --web.listen-address=:9100
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-90d}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    ports:
+      - ${GRAFANA_PORT:-3030}:3000
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      # Read-only access without login. Only safe because the server is reached over Tailscale/LAN.
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS:-true}
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/jellyfin.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  prometheus-data:
+  grafana-data:

@@ -1,0 +1,11 @@
+[project]
+name = "jellyfin-exporter"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["prometheus-client>=0.21"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
